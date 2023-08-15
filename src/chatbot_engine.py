@@ -1,0 +1,51 @@
+from typing import List
+
+import langchain
+from langchain.agents import AgentType, initialize_agent
+from langchain.agents.agent_toolkits import VectorStoreInfo, VectorStoreToolkit
+from langchain.chat_models import ChatOpenAI
+from langchain.document_loaders import DirectoryLoader
+from langchain.indexes import VectorstoreIndexCreator
+from langchain.indexes.vectorstore import VectorStoreIndexWrapper
+from langchain.memory import ChatMessageHistory, ConversationBufferMemory
+from langchain.tools import BaseTool
+
+langchain.verbose = True
+
+
+def create_index() -> VectorStoreIndexWrapper:
+    loader = DirectoryLoader("./src/", glob="**/*.py")
+    return VectorstoreIndexCreator().from_loaders([loader])
+
+
+# toolとはagentが使えるアクションのこと
+# toolkitは、そのアクションを取りまとめたもの
+# ここでは、受け取ったvector storeをtoolとして使用できるように設定している
+def create_tools(index: VectorStoreIndexWrapper) -> List[BaseTool]:
+    vectorstore_info = VectorStoreInfo(
+        vectorstore=index.vectorstore,
+        name="udemy-langchain source code",
+        description="Source code of application named udemy-langchain",
+    )
+    toolkit = VectorStoreToolkit(vectorstore_info=vectorstore_info)
+    return toolkit.get_tools()
+
+
+def chat(
+    message: str, history: ChatMessageHistory, index: VectorStoreIndexWrapper
+) -> str:
+    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+
+    tools = create_tools(index)
+
+    memory = ConversationBufferMemory(
+        chat_memory=history, memory_key="chat_history", return_messages=True
+    )
+
+    # chat専用のAgentを使う
+    # https://python.langchain.com/docs/modules/agents/agent_types/chat_conversation_agent
+    agent_chain = initialize_agent(
+        tools, llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, memory=memory, verbose=True
+    )
+
+    return agent_chain.run(input=message)
